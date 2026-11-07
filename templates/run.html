@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Run #{{ run.id }}{% endblock %}
+
+{% block content %}
+  <h1>Run #{{ run.id }} — {{ run.filename }}</h1>
+  <p class="muted">
+    Dataset: <a href="/datasets/{{ run.dataset_id }}">{{ dataset_name }}</a>
+    &middot;
+    {{ run.created_at[:16]|replace('T', ' ') }}
+  </p>
+
+  <div class="score-banner">
+    <span class="{% if run.errors == 0 %}score-good{% else %}score-bad{% endif %}">
+      {{ "%.1f"|format(run.score) }}/100 — {% if run.errors == 0 %}Pass{% else %}Fail{% endif %}
+    </span>
+  </div>
+
+  <div class="stats">
+    <span class="stat">Rows: {{ run.total_rows }}</span>
+    <span class="stat">Checks: {{ run.checks_run }}</span>
+    <span class="stat">Errors: {{ run.errors }}</span>
+    <span class="stat">Warnings: {{ run.warnings }}</span>
+  </div>
+
+  <p>
+    <a href="/runs/{{ run.id }}/export" class="btn">Download violations (CSV)</a>
+  </p>
+
+  <h2>Columns</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Nulls</th>
+        <th>Distinct values</th>
+        <th>Violations</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for column, stats in run.column_stats.items() %}
+        <tr>
+          <td>{{ column }}</td>
+          <td>{{ stats.nulls }}</td>
+          <td>{{ stats.distinct }}</td>
+          <td>{{ stats.violations }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Violations</h2>
+  {% if not run.violations %}
+    <p class="muted">No violations — this file matches the contract.</p>
+  {% else %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Row</th>
+          <th>Column</th>
+          <th>Rule</th>
+          <th>Message</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in run.violations[:200] %}
+          <tr>
+            <td>{{ v.row if v.row is not none else '—' }}</td>
+            <td>{{ v.column }}</td>
+            <td>{{ v.rule }}</td>
+            <td>{{ v.message }}</td>
+            <td>{{ v.value if v.value is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if show_truncated %}
+      <p class="muted">
+        Showing the first 200 of {{ run.violations|length }} violations — download the CSV for the full list.
+      </p>
+    {% endif %}
+  {% endif %}
+{% endblock %}

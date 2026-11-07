@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}New dataset{% endblock %}
+
+{% block content %}
+<h1>New dataset</h1>
+
+{% if error %}
+<p class="error" role="alert">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/datasets/new">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="field">
+    <label for="dataset_name">Dataset name</label>
+    <input type="text" id="dataset_name" name="dataset_name" value="{{ dataset_name or '' }}">
+  </div>
+
+  <h2>Columns</h2>
+  <div id="columns">
+    {% for col in prefill %}
+    <div class="col-row">
+      <div class="field">
+        <label>Name</label>
+        <input type="text" name="col_name" value="{{ col.name or '' }}">
+      </div>
+      <div class="field">
+        <label>Type</label>
+        <select name="col_type">
+          <option value="string" {% if col.type == 'string' %}selected{% endif %}>string</option>
+          <option value="integer" {% if col.type == 'integer' %}selected{% endif %}>integer</option>
+          <option value="number" {% if col.type == 'number' %}selected{% endif %}>number</option>
+          <option value="boolean" {% if col.type == 'boolean' %}selected{% endif %}>boolean</option>
+          <option value="date" {% if col.type == 'date' %}selected{% endif %}>date</option>
+          <option value="email" {% if col.type == 'email' %}selected{% endif %}>email</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Required</label>
+        <select name="col_required">
+          <option value="yes" {% if col.required %}selected{% endif %}>yes</option>
+          <option value="no" {% if not col.required %}selected{% endif %}>no</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Unique</label>
+        <select name="col_unique">
+          <option value="yes" {% if col.unique %}selected{% endif %}>yes</option>
+          <option value="no" {% if not col.unique %}selected{% endif %}>no</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Min</label>
+        <input type="text" name="col_min" value="{{ col.min if col.min is not none else '' }}">
+      </div>
+      <div class="field">
+        <label>Max</label>
+        <input type="text" name="col_max" value="{{ col.max if col.max is not none else '' }}">
+      </div>
+      <div class="field">
+        <label>Pattern</label>
+        <input type="text" name="col_pattern" placeholder="regex, optional" value="{{ col.pattern or '' }}">
+      </div>
+      <div class="field">
+        <label>Allowed values</label>
+        <input type="text" name="col_allowed" placeholder="comma-separated, optional" value="{{ col.allowed | join(', ') if col.allowed else '' }}">
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <button type="button" id="add-col" class="btn">Add column</button>
+  <button type="submit" class="btn btn-primary">Create dataset</button>
+</form>
+
+<p class="muted">Each column is checked on every row: required values, types, ranges, patterns, allowed values, and uniqueness.</p>
+
+<script>
+document.getElementById('add-col').addEventListener('click', function () {
+  var rows = document.querySelectorAll('.col-row');
+  var last = rows[rows.length - 1];
+  var clone = last.cloneNode(true);
+  clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+  // New columns default to type string, not required, not unique.
+  clone.querySelectorAll('select').forEach(function (s) {
+    s.selectedIndex = (s.name === 'col_required' || s.name === 'col_unique') ? 1 : 0;
+  });
+  last.after(clone);
+});
+</script>
+{% endblock %}

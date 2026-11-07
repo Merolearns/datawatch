@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <h1>Your datasets</h1>
+    <a href="/datasets/new" class="btn btn-primary">New dataset</a>
+  </div>
+
+  {% if datasets %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Dataset</th>
+          <th>Runs</th>
+          <th>Last score</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ds in datasets %}
+          <tr>
+            <td><a href="/datasets/{{ ds.id }}">{{ ds.name }}</a></td>
+            <td>{{ ds.run_count }}</td>
+            <td>
+              {% if ds.last_score is not none %}
+                {% set score_class = 'score-bad' %}
+                {% if ds.last_score >= 90 %}
+                  {% set score_class = 'score-good' %}
+                {% elif ds.last_score >= 70 %}
+                  {% set score_class = 'score-warn' %}
+                {% endif %}
+                <span class="{{ score_class }}">{{ "%.1f"|format(ds.last_score) }}/100</span>
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td>{{ ds.created_at[:16]|replace('T', ' ') }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No datasets yet. Create your first contract to start watching a dataset.</p>
+  {% endif %}
+
+  <h2>Recent runs</h2>
+
+  {% if recent_runs %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Dataset</th>
+          <th>File</th>
+          <th>Score</th>
+          <th>Errors</th>
+          <th>Rows</th>
+          <th>When</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in recent_runs %}
+          <tr>
+            <td><a href="/datasets/{{ run.dataset_id }}">{{ run.dataset_name }}</a></td>
+            <td>{{ run.filename }}</td>
+            <td><a href="/runs/{{ run.id }}">{{ "%.1f"|format(run.score) }}/100</a></td>
+            <td>{{ run.errors }}</td>
+            <td>{{ run.total_rows }}</td>
+            <td>{{ run.created_at[:16]|replace('T', ' ') }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No runs yet.</p>
+  {% endif %}
+{% endblock %}
