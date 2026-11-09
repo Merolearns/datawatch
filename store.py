@@ -1,5 +1,5 @@
-import sqlite3
 import json
+import sqlite3
 from datetime import datetime, timezone
 
 
@@ -55,8 +55,47 @@ def init_db(db_path) -> None:
                 message TEXT NOT NULL,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS schedules (
+                id INTEGER PRIMARY KEY,
+                dataset_id INTEGER UNIQUE NOT NULL,
+                interval_minutes INTEGER NOT NULL DEFAULT 60,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                last_run_at TEXT,
+                next_run_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS alert_rules (
+                dataset_id INTEGER PRIMARY KEY,
+                score_below REAL,
+                errors_above INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY,
+                dataset_id INTEGER NOT NULL,
+                run_id INTEGER,
+                rule TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                acknowledged INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
+        # Migrate databases created before Phase 2: add the new columns
+        # when they are missing. Existing data is left untouched.
+        _add_column_if_missing(conn, "runs", "profile_json", "TEXT")
+        _add_column_if_missing(
+            conn, "runs", "source", "TEXT NOT NULL DEFAULT 'manual'"
+        )
+        _add_column_if_missing(conn, "datasets", "last_csv_text", "TEXT")
+        _add_column_if_missing(conn, "datasets", "last_filename", "TEXT")
+
+
+def _add_column_if_missing(conn, table, column, ddl):
+    cols = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def create_user(db_path, username, password_hash) -> int:
@@ -129,7 +168,7 @@ def get_dataset(db_path, dataset_id):
         return result
 
 
-def save_run(db_path, dataset_id, filename, result) -> int:
+def save_run(db_path, dataset_id, filename, result, profile=None, source="manual") -> int:
     summary = result.get("summary", {})
     errors = summary.get("errors", 0)
     warnings = summary.get("warnings", 0)
@@ -138,8 +177,8 @@ def save_run(db_path, dataset_id, filename, result) -> int:
         cur = conn.execute(
             """
             INSERT INTO runs
-            (dataset_id, filename, score, errors, warnings, total_rows, checks_run, column_stats_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (dataset_id, filename, score, errors, warnings, total_rows, checks_run, column_stats_json, profile_json, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 dataset_id,
@@ -150,6 +189,8 @@ def save_run(db_path, dataset_id, filename, result) -> int:
                 result["total_rows"],
                 result["checks_run"],
                 json.dumps(result["column_stats"]),
+                json.dumps(profile) if profile is not None else None,
+                source,
                 _utc_now(),
             ),
         )
@@ -196,7 +237,7 @@ def get_run(db_path, run_id):
         row = conn.execute(
             """
             SELECT id, dataset_id, filename, score, errors, warnings, total_rows,
-                   checks_run, column_stats_json, created_at
+                   checks_run, column_stats_json, profile_json, source, created_at
             FROM runs
             WHERE id = ?
             """,
@@ -207,6 +248,8 @@ def get_run(db_path, run_id):
 
         result = dict(row)
         result["column_stats"] = json.loads(result.pop("column_stats_json"))
+        profile_json = result.pop("profile_json")
+        result["profile"] = json.loads(profile_json) if profile_json else None
 
         vrows = conn.execute(
             """
@@ -236,3 +279,194 @@ def latest_runs(db_path, user_id, limit=10):
             (user_id, limit),
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def set_last_csv(db_path, dataset_id, text, filename):
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE datasets SET last_csv_text = ?, last_filename = ? WHERE id = ?",
+            (text, filename, dataset_id),
+        )
+
+
+def get_last_csv(db_path, dataset_id):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT last_csv_text, last_filename FROM datasets WHERE id = ?",
+            (dataset_id,),
+        ).fetchone()
+        if not row or row["last_csv_text"] is None:
+            return None
+        return {"text": row["last_csv_text"], "filename": row["last_filename"]}
+
+
+def upsert_schedule(db_path, dataset_id, interval_minutes, enabled):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, next_run_at FROM schedules WHERE dataset_id = ?",
+            (dataset_id,),
+        ).fetchone()
+        if row is None:
+            next_run_at = None
+            if enabled:
+                next_run_at = _add_minutes(_utc_now(), interval_minutes)
+            cur = conn.execute(
+                """
+                INSERT INTO schedules
+                (dataset_id, interval_minutes, enabled, next_run_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (dataset_id, interval_minutes, 1 if enabled else 0, next_run_at),
+            )
+            schedule_id = cur.lastrowid
+        else:
+            schedule_id = row["id"]
+            next_run_at = row["next_run_at"]
+            if enabled and next_run_at is None:
+                next_run_at = _add_minutes(_utc_now(), interval_minutes)
+            conn.execute(
+                """
+                UPDATE schedules
+                SET interval_minutes = ?, enabled = ?, next_run_at = ?
+                WHERE id = ?
+                """,
+                (interval_minutes, 1 if enabled else 0, next_run_at, schedule_id),
+            )
+    return get_schedule(db_path, dataset_id)
+
+
+def _add_minutes(iso, minutes):
+    from datetime import timedelta
+
+    when = datetime.fromisoformat(iso)
+    return (when + timedelta(minutes=minutes)).isoformat()
+
+
+def get_schedule(db_path, dataset_id):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, dataset_id, interval_minutes, enabled, last_run_at, next_run_at
+            FROM schedules WHERE dataset_id = ?
+            """,
+            (dataset_id,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["enabled"] = bool(result["enabled"])
+        return result
+
+
+def list_due_schedules(db_path, now_iso):
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, dataset_id, interval_minutes, enabled, last_run_at, next_run_at
+            FROM schedules
+            WHERE enabled = 1 AND (next_run_at IS NULL OR next_run_at <= ?)
+            ORDER BY next_run_at ASC, id ASC
+            """,
+            (now_iso,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            result = dict(row)
+            result["enabled"] = bool(result["enabled"])
+            results.append(result)
+        return results
+
+
+def touch_schedule(db_path, schedule_id, last_run_at, next_run_at):
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?",
+            (last_run_at, next_run_at, schedule_id),
+        )
+
+
+def set_alert_rules(db_path, dataset_id, score_below, errors_above):
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO alert_rules (dataset_id, score_below, errors_above)
+            VALUES (?, ?, ?)
+            ON CONFLICT(dataset_id) DO UPDATE SET
+                score_below = excluded.score_below,
+                errors_above = excluded.errors_above
+            """,
+            (dataset_id, score_below, errors_above),
+        )
+
+
+def get_alert_rules(db_path, dataset_id):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT score_below, errors_above FROM alert_rules WHERE dataset_id = ?",
+            (dataset_id,),
+        ).fetchone()
+        if not row:
+            return {"score_below": None, "errors_above": None}
+        return {"score_below": row["score_below"], "errors_above": row["errors_above"]}
+
+
+def create_alert(db_path, dataset_id, run_id, rule, message) -> int:
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO alerts
+            (dataset_id, run_id, rule, message, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (dataset_id, run_id, rule, message, _utc_now()),
+        )
+        return cur.lastrowid
+
+
+def list_alerts(db_path, user_id, limit=50):
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT a.id, a.dataset_id, a.run_id, a.rule, a.message,
+                   a.created_at, a.acknowledged, d.name AS dataset_name
+            FROM alerts a
+            JOIN datasets d ON d.id = a.dataset_id
+            WHERE d.user_id = ?
+            ORDER BY a.created_at DESC, a.id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+        results = []
+        for row in rows:
+            result = dict(row)
+            result["acknowledged"] = bool(result["acknowledged"])
+            results.append(result)
+        return results
+
+
+def unread_alert_count(db_path, user_id) -> int:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM alerts a
+            JOIN datasets d ON d.id = a.dataset_id
+            WHERE d.user_id = ? AND a.acknowledged = 0
+            """,
+            (user_id,),
+        ).fetchone()
+        return row["n"]
+
+
+def acknowledge_alert(db_path, alert_id, user_id) -> bool:
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            UPDATE alerts SET acknowledged = 1
+            WHERE id = ? AND dataset_id IN (
+                SELECT id FROM datasets WHERE user_id = ?
+            )
+            """,
+            (alert_id, user_id),
+        )
+        return cur.rowcount > 0
