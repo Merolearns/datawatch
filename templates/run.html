@@ -49,6 +49,52 @@
     </tbody>
   </table>
 
+  {% if run.profile %}
+  <h2>Column profiles</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Rows</th>
+        <th>Nulls</th>
+        <th>Null %</th>
+        <th>Distinct</th>
+        <th>Min</th>
+        <th>Max</th>
+        <th>Mean</th>
+        <th>Median</th>
+        <th>Top values</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for column, p in run.profile.items() %}
+        <tr>
+          <td>{{ column }}</td>
+          {% if p.missing %}
+            <td colspan="9" class="muted">Missing from the data</td>
+          {% else %}
+            <td>{{ p.rows }}</td>
+            <td>{{ p.nulls }}</td>
+            <td>{{ p.null_pct }}</td>
+            <td>{{ p.distinct }}</td>
+            <td>{{ p.min if p.min is defined and p.min is not none else "—" }}</td>
+            <td>{{ p.max if p.max is defined and p.max is not none else "—" }}</td>
+            <td>{{ p.mean if p.mean is defined and p.mean is not none else "—" }}</td>
+            <td>{{ p.median if p.median is defined and p.median is not none else "—" }}</td>
+            <td>
+              {% if p.top_values is defined and p.top_values %}
+                {% for tv in p.top_values %}{{ tv.value }} ({{ tv.count }}){% if not loop.last %}, {% endif %}{% endfor %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <h2>Violations</h2>
   {% if not run.violations %}
     <p class="muted">No violations — this file matches the contract.</p>

@@ -167,6 +167,16 @@ h2 {
   font-weight: bold;
 }
 
+.badge {
+  display: inline-block;
+  background: #e8a33d;
+  color: #14100a;
+  font-size: 0.75rem;
+  font-weight: bold;
+  padding: 0.125rem 0.5rem;
+  border-radius: 1rem;
+}
+
 form label {
   display: block;
   font-size: 0.75rem;

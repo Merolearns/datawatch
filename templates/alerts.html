@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Alerts{% endblock %}
+
+{% block content %}
+<h1>Alerts</h1>
+<p class="muted">In-app alerts when a run breaks one of your rules. Acknowledge an alert to clear it from the unread count.</p>
+
+{% if alerts %}
+<table class="table">
+  <thead>
+    <tr>
+      <th>Dataset</th>
+      <th>Rule</th>
+      <th>Message</th>
+      <th>When</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for alert in alerts %}
+    <tr>
+      <td><a href="/datasets/{{ alert.dataset_id }}">{{ alert.dataset_name }}</a></td>
+      <td>{{ alert.rule }}</td>
+      <td>
+        {% if alert.run_id %}
+        <a href="/runs/{{ alert.run_id }}">{{ alert.message }}</a>
+        {% else %}
+        {{ alert.message }}
+        {% endif %}
+      </td>
+      <td>{{ alert.created_at[:16]|replace('T', ' ') }}</td>
+      <td>{% if alert.acknowledged %}Acknowledged{% else %}<span class="badge">New</span>{% endif %}</td>
+      <td>
+        {% if not alert.acknowledged %}
+        <form method="post" action="/alerts/{{ alert.id }}/acknowledge">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn">Acknowledge</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No alerts yet.</p>
+{% endif %}
+{% endblock %}

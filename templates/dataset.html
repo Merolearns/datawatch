@@ -56,6 +56,60 @@
   </p>
 </form>
 
+<h2>Monitoring</h2>
+{% if schedule and schedule.enabled %}
+<p class="muted">
+  On — re-checks the latest uploaded file
+  {% if schedule.interval_minutes == 15 %}every 15 minutes{% elif schedule.interval_minutes == 60 %}hourly{% elif schedule.interval_minutes == 360 %}every 6 hours{% else %}daily{% endif %}.
+  {% if schedule.next_run_at %}Next run: {{ schedule.next_run_at[:16]|replace('T', ' ') }}.{% endif %}
+  {% if schedule.last_run_at %}Last run: {{ schedule.last_run_at[:16]|replace('T', ' ') }}.{% endif %}
+</p>
+{% else %}
+<p class="muted">Monitoring is off.</p>
+{% endif %}
+<form method="post" action="/datasets/{{ dataset.id }}/schedule">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <p>
+    <label for="interval_minutes">Check interval</label>
+    <select name="interval_minutes" id="interval_minutes">
+      <option value="15" {% if schedule and schedule.interval_minutes == 15 %}selected{% endif %}>Every 15 minutes</option>
+      <option value="60" {% if schedule and schedule.interval_minutes == 60 %}selected{% endif %}>Hourly</option>
+      <option value="360" {% if schedule and schedule.interval_minutes == 360 %}selected{% endif %}>Every 6 hours</option>
+      <option value="1440" {% if schedule and schedule.interval_minutes == 1440 %}selected{% endif %}>Daily</option>
+    </select>
+  </p>
+  <p>
+    <label><input type="checkbox" name="enabled" {% if schedule and schedule.enabled %}checked{% endif %}> Enable monitoring</label>
+  </p>
+  <p>
+    <button type="submit" class="btn btn-primary">Save monitoring</button>
+  </p>
+</form>
+<form method="post" action="/datasets/{{ dataset.id }}/run-now">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <p>
+    <button type="submit" class="btn">Run now</button>
+    <span class="muted">Re-checks the latest uploaded file right away.</span>
+  </p>
+</form>
+
+<h2>Alert rules</h2>
+<p class="muted">When a run breaks a rule, an alert appears on the Alerts page. Leave a field blank to turn that rule off.</p>
+<form method="post" action="/datasets/{{ dataset.id }}/alert-rules">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <p>
+    <label for="score_below">Alert when score falls below</label>
+    <input type="text" name="score_below" id="score_below" value="{{ alert_rules.score_below if alert_rules.score_below is not none else '' }}" placeholder="e.g. 99">
+  </p>
+  <p>
+    <label for="errors_above">Alert when errors go above</label>
+    <input type="text" name="errors_above" id="errors_above" value="{{ alert_rules.errors_above if alert_rules.errors_above is not none else '' }}" placeholder="e.g. 0">
+  </p>
+  <p>
+    <button type="submit" class="btn btn-primary">Save alert rules</button>
+  </p>
+</form>
+
 <h2>Score trend</h2>
 {% if trend_svg %}
 {{ trend_svg | safe }}

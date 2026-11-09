@@ -15,6 +15,7 @@
     <nav class="topbar-right">
       {% if session.username %}
         <span class="user">{{ session.username }}</span>
+        <a href="/alerts">Alerts{% if g.unread_alerts %} ({{ g.unread_alerts }}){% endif %}</a>
         <a href="/logout">Log out</a>
       {% else %}
         <a href="/login">Log in</a>

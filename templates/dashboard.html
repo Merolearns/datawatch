@@ -75,4 +75,33 @@
   {% else %}
     <p class="muted">No runs yet.</p>
   {% endif %}
+
+  {% if recent_alerts %}
+  <h2>Recent alerts</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Dataset</th>
+        <th>Message</th>
+        <th>When</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for alert in recent_alerts %}
+      <tr>
+        <td><a href="/datasets/{{ alert.dataset_id }}">{{ alert.dataset_name }}</a></td>
+        <td>
+          {% if alert.run_id %}
+          <a href="/runs/{{ alert.run_id }}">{{ alert.message }}</a>
+          {% else %}
+          {{ alert.message }}
+          {% endif %}
+        </td>
+        <td>{{ alert.created_at[:16]|replace('T', ' ') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><a href="/alerts">View all alerts{% if unread_alerts %} ({{ unread_alerts }} unread){% endif %}</a></p>
+  {% endif %}
 {% endblock %}
