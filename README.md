@@ -69,32 +69,57 @@ Uploads are limited to 5 MB.
 - `GET /api/datasets/<id>/runs` — JSON list of runs for a dataset (login
   required; 401 when logged out).
 
+## Phase 2 — monitoring, alerts, profiling
+
+- **Column profiling** — every run now stores per-column stats: row and null
+  counts, null %, distinct values, min/max/mean/median for numeric columns,
+  earliest/latest for dates, and the five most common values for text
+  columns. Shown in a "Column profiles" table on the run page.
+- **Scheduled monitoring** — on a dataset page, pick an interval (every 15
+  minutes, hourly, every 6 hours, daily) and enable monitoring. While the
+  server is running, a background thread re-checks the dataset's latest
+  uploaded file on that schedule and saves each re-check as a run. "Run now"
+  re-checks it right away. A schedule with no uploaded file yet just waits —
+  it never spins.
+- **Alerts** — set rules per dataset: alert when a run's score falls below a
+  number (0–100), or when its error count goes above a number. Broken rules
+  create in-app alerts (no email) with the real score or error count in the
+  message. The nav bar shows the unread count, the dashboard lists recent
+  alerts, and each alert can be acknowledged on the Alerts page.
+
+Limit: scheduled checks only run while the server is running. Stop the
+server and the schedule pauses; it resumes where it left off when the
+server starts again.
+
 ## Tests
 
 ```bash
 python -m pytest tests/ -q
 ```
 
-49 tests: engine rules (required/type/range/pattern/allowed/unique/missing
+73 tests: engine rules (required/type/range/pattern/allowed/unique/missing
 column, scoring, BOM and duplicate-header handling), store CRUD, auth
 hashing, the SVG trend chart, and the Flask routes end to end (register,
-login, dataset creation, sample runs, export, per-user isolation).
+login, dataset creation, sample runs, export, per-user isolation), plus
+Phase 2 coverage for profiling math, the scheduler and alert rules, and
+the monitoring/alerts routes (including per-user isolation).
 
 ## Project layout
 
 ```
 app.py            Flask app: routes, auth, CSRF, upload handling
 engine.py         contract validation (stdlib only)
-store.py          SQLite persistence (datasets, runs, violations)
+profile.py        per-column profiling (stdlib only)
+monitor.py        shared run execution, alert checks, scheduler thread
+store.py          SQLite persistence (datasets, runs, violations, schedules, alerts)
 auth.py           PBKDF2 password hashing
 charts.py         SVG score-trend chart
-templates/        Jinja pages (dashboard, builder, dataset, run, auth)
+templates/        Jinja pages (dashboard, builder, dataset, run, auth, alerts)
 static/style.css  dark amber/teal theme
 data/             bundled clean/dirty order samples + generator
 tests/            pytest suite
 ```
 
-## Roadmap (Phase 2)
+## Roadmap
 
-Scheduled/repeat monitoring with snapshot comparison, alerts when a run's
-score drops below a threshold, per-column profiling, and a live deployment.
+Live deployment next.
