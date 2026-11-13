@@ -4,9 +4,10 @@ A data observability platform: define a **data contract** (the schema and rules
 a dataset should follow), run it against a CSV upload, and get a violation
 report with a quality score — then watch that score over time.
 
-This is Phase 1 of a larger build. It covers contracts, validation runs, run
-history with a score trend, and accounts. Scheduled monitoring, alerts, and
-column profiling are planned for Phase 2.
+This is a data observability platform in two shipped phases. Phase 1
+covers contracts, validation runs, run history with a score trend, and
+accounts. Phase 2 adds per-column profiling, scheduled monitoring, and
+in-app alerts. Live deployment is in progress — see [Deployment](#deployment).
 
 ## What it does
 
@@ -25,6 +26,14 @@ column profiling are planned for Phase 2.
 - **Upload, paste, or sample** — run a check from a CSV file, pasted CSV
   text, or one of the two bundled samples. Violations download as CSV, and
   run history is available as JSON.
+- **Column profiling** — every run profiles each column (min/max/mean/
+  median, null %, distinct count, top values, date ranges) on the run page.
+- **Scheduled monitoring** — re-check the latest uploaded file on a
+  schedule (15 minutes, hourly, 6-hourly, daily) or with Run now, from
+  the dataset page.
+- **Alerts** — rules that fire when a run scores below a threshold or
+  has too many errors; unread alerts show in the nav bar, and each alert
+  can be acknowledged from the Alerts page.
 
 ## Example output
 
@@ -58,6 +67,26 @@ python app.py
 
 Open http://127.0.0.1:5001, sign up, create a dataset (the builder comes
 prefilled with the orders contract), and run the dirty sample.
+
+## Deployment
+
+DataWatch deploys as a Docker container on the shared VPS behind Caddy
+(`datawatch.40.160.149.104.nip.io`), following the agent-platform
+pattern. Everything needed lives in `deploy/` — see
+[deploy/README.md](deploy/README.md) and the first-deploy
+[deploy/CHECKLIST.md](deploy/CHECKLIST.md). Deployments run from GitHub
+Actions (manual trigger) on the `slate-vps` self-hosted runner; no
+secrets are needed. A `/healthz` endpoint (app up + SQLite readable)
+backs the container healthcheck and the deploy smoke test
+(`deploy/smoke-test.py`, also runnable locally against port 5001).
+
+Environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `DATAWATCH_SECRET` | Flask session secret. Required in production — the deploy script generates it on first install. Without it the app logs a warning and uses an ephemeral secret (sessions do not survive a restart). |
+| `DATAWATCH_DB` | SQLite database path. Defaults to `data/datawatch.db`; the container sets it to `/data/datawatch.db` (the persistent volume). |
+| `DATAWATCH_NO_SCHEDULER` | Set to `1` to skip the monitoring scheduler thread (tests set this). |
 
 Set `DATAWATCH_SECRET` to a long random value in production; without it the
 app generates an ephemeral secret at startup and sessions do not survive a
