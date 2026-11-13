@@ -134,10 +134,12 @@ if command -v crontab >/dev/null; then
     log "backup cron already installed"
   else
     log "installing nightly backup cron (04:30 UTC)"
-    (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+    # NOTE (Nov 13, 2026): the || true is load-bearing. Under set -euo pipefail, a missing crontab makes crontab -l exit 1, which aborts this subshell before echo runs; crontab - then gets empty stdin and the deploy fails. The first deploy failed exactly this way (empty crontab left behind).
+    (crontab -l 2>/dev/null || true; echo "$CRON_LINE") | crontab -
   fi
 else
   log "WARNING: crontab not found — nightly backup cron NOT installed (see deploy/CHECKLIST.md §6)"
+  
 fi
 
 # --- 6. Disk guard -------------------------------------------------------------
