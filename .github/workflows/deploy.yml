@@ -1,0 +1,65 @@
+name: deploy
+
+# Deploy DataWatch to the shared OVH VPS (SLATE box).
+# Manual trigger only (workflow_dispatch): the parent triggers it when the
+# box is ready. Nothing here runs on push — CI (ci.yml) is the push gate,
+# and a deploy off an untested commit is never automatic.
+#
+# Runs ON the VPS via the self-hosted runner (runs-on: slate-vps), so NO
+# SSH key and NO repo secrets are needed: the runner is already on the
+# box. One-time prerequisite (deploy/CHECKLIST.md §0, done by the SLATE
+# side chat via vps-ops): /srv/datawatch must exist and be owned by
+# actions-runner, or the repo-sync step cannot write there. DataWatch
+# needs no secrets at all — accounts are self-signup, there are no seeded
+# demo logins and no LLM keys. DATAWATCH_SECRET (Flask sessions) is
+# generated on first install by deploy-remote.sh and persisted in
+# /srv/datawatch/.env on the VPS (mode 600, never printed).
+#
+# What it does, in order (each step fails the run loudly on error):
+#   1. Sync the repo to /srv/datawatch/repo at exactly $GITHUB_SHA.
+#   2. Copy docker-compose.yml to /srv/datawatch/.
+#   3. Run deploy/deploy-remote.sh on the VPS: RAM gate, build, up -d,
+#      /healthz poll (up to 5 min), end-to-end smoke (sign up, create the
+#      orders dataset, run the dirty sample, expect 98.7/100), backup
+#      cron, disk guard. Any failure aborts the run with the numbers in
+#      the log.
+#
+# What it does NOT do: the Caddy route
+# (datawatch.40.160.149.104.nip.io) is a one-time manual append — see
+# deploy/caddy-snippet and deploy/CHECKLIST.md. Until the route exists,
+# the app is verified over the loopback port only, not via a public URL.
+# Nothing in this workflow edits SLATE's files, routes, or env, or the
+# agent platform's.
+#
+# If a run sits queued forever, the slate-vps runner is not visible to
+# this repo (it may be repo-scoped to SLATE) — use the SSH fallback in
+# deploy/CHECKLIST.md §3b instead (needs the VPS_SSH_KEY repo secret).
+#
+# NOTE (Nov 13, 2026): workflow files cannot be pushed by API or git —
+# the PATs lack the Workflows permission (a tree containing any
+# .github/workflows/ path is refused with 403). This file was added in
+# the repo web UI ("Add file" -> "Create new file"); edit it the same
+# way. See deploy/CHECKLIST.md §1.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: slate-vps
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync repo to the VPS at this SHA
+        run: |
+          if [ -d /srv/datawatch/repo/.git ]; then git -C /srv/datawatch/repo fetch -q origin && git -C /srv/datawatch/repo checkout -q ${{ github.sha }}; else git clone -q https://github.com/Merolearns/datawatch.git /srv/datawatch/repo && git -C /srv/datawatch/repo checkout -q ${{ github.sha }}; fi
+          git -C /srv/datawatch/repo rev-parse HEAD
+
+      - name: Copy compose file, run the VPS deploy script
+        run: |
+          cp deploy/docker-compose.yml /srv/datawatch/docker-compose.yml
+          bash /srv/datawatch/repo/deploy/deploy-remote.sh ${{ github.sha }}
