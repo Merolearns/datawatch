@@ -3,8 +3,19 @@
 Status: PREP DONE Nov 13, 2026 (flagship-builder cron) — Dockerfile,
 compose, deploy script, smoke test, Caddy snippet, and both workflow
 files are written and pushed to `main` except the workflow files
-themselves (see §1). NOT YET DEPLOYED: the workflow trigger (§3) and
-the Caddy route (§4) are still to do.
+themselves (see §1). NOT YET DEPLOYED: the one-time VPS prep (§0),
+the workflow trigger (§3), and the Caddy route (§4) are still to do.
+
+## 0. One-time VPS prep (SLATE side chat, vps-ops — DONE? NO, requested Nov 13)
+The probe (vps-ops run 43399676983, Nov 13) proved the runner route
+needs this first: the `slate-vps` runner is online and can run docker,
+but `actions-runner` cannot write to `/srv` (root-owned) and has no
+passwordless sudo. As root, once:
+`mkdir -p /srv/datawatch && chown -R actions-runner:actions-runner /srv/datawatch`
+Do NOT trigger the deploy until this is confirmed — the workflow's
+repo-sync step fails at the `git clone` without it. (RAM at probe
+time: 758 MB free / 1,660 MB available; disk 43 GB free; port 5002
+free. DataWatch needs ~100 MB.)
 
 ## 1. Parent action A — land the workflow files (browser, GitHub web UI)
 The vault PAT and the gh CLI PAT both lack the **Workflows** permission,
