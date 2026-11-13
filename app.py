@@ -4,6 +4,7 @@ import io
 import os
 import re
 import secrets
+import sqlite3
 
 from flask import (
     Flask,
@@ -155,7 +156,9 @@ def _csv_safe(value):
 
 def create_app(db_path=None):
     if db_path is None:
-        db_path = os.path.join(
+        # DATAWATCH_DB lets the deployed container keep its database on
+        # the persistent volume (/data) instead of the app directory.
+        db_path = os.environ.get("DATAWATCH_DB") or os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "data", "datawatch.db"
         )
 
@@ -193,6 +196,23 @@ def create_app(db_path=None):
     @app.errorhandler(413)
     def _too_large(error):
         return "That file is too large (max 5 MB).", 413
+
+    @app.route("/healthz")
+    def healthz():
+        # App up + SQLite readable. No login: the deploy health check and
+        # the container HEALTHCHECK hit this. A DB failure is a 503.
+        try:
+            conn = sqlite3.connect(db_path, timeout=5)
+            try:
+                conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='users'"
+                ).fetchone()
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - health check must not raise
+            return jsonify({"status": "error", "error": str(e)}), 503
+        return jsonify({"status": "ok"})
 
     @app.route("/")
     @login_required
