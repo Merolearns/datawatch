@@ -139,7 +139,6 @@ if command -v crontab >/dev/null; then
   fi
 else
   log "WARNING: crontab not found — nightly backup cron NOT installed (see deploy/CHECKLIST.md §6)"
-  
 fi
 
 # --- 6. Disk guard -------------------------------------------------------------
