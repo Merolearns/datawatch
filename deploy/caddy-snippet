@@ -1,0 +1,28 @@
+# Caddy route for DataWatch — APPEND to the VPS Caddyfile BELOW SLATE's
+# blocks and BELOW the agent-platform blocks. Keep it separate from
+# SLATE's routes: a bad edit here must never take SLATE down, and a SLATE
+# edit must never take this app down.
+#
+# Host: datawatch.40.160.149.104.nip.io (free nip.io DNS, same as SLATE's
+# 40.160.149.104.nip.io host). Caddy auto-provisions the Let's Encrypt
+# cert; no domain purchase needed.
+#
+# Caddy runs as Docker container `slate-caddy`, NOT a host service — there
+# is no /etc/caddy/Caddyfile on the host and no systemctl caddy. The
+# Caddyfile lives at /srv/slate/infra/caddy/Caddyfile on the host
+# (bind-mounted read-only into the container). Edit the HOST file, then:
+#   docker exec slate-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   docker exec slate-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+# Only reload after validation exits 0. A bad Caddyfile breaks every site
+# on the box, SLATE included.
+#
+# `reverse_proxy localhost:5002` does NOT work from inside the Caddy
+# container (localhost = the container itself). Connect the Caddy
+# container to the datawatch_default network first:
+#   docker network connect datawatch_default slate-caddy
+# then point the route at the container by name on its INTERNAL port
+# 5001 (the 5002 mapping is host-side only).
+
+datawatch.40.160.149.104.nip.io {
+	reverse_proxy datawatch:5001
+}

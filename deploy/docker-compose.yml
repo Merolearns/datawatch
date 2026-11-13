@@ -1,0 +1,65 @@
+# DataWatch — own Compose project on the shared OVH VPS (SLATE box).
+# Lives on the VPS at /srv/datawatch/docker-compose.yml. This copy in the
+# repo is the source of truth; the deploy workflow copies it over.
+#
+# Isolation from SLATE and the agent platform (same pattern as
+# agent-platform/deploy/docker-compose.yml): own project, own container,
+# own named volume, hard memory/CPU limits. Never share SLATE's
+# Redis/MinIO/Postgres; DataWatch keeps its own SQLite file under /data.
+#
+# Image: built ON the VPS at deploy time from the repo checkout
+# (/srv/datawatch/repo) — deliberately NOT built in GitHub Actions.
+# `image: datawatch:local` is the local tag the build produces; never
+# push it anywhere.
+#
+# Memory: a small Flask + gunicorn app, no models. mem_limit 512m is the
+# measured need plus headroom — it is ENFORCED, not guessed:
+# deploy/deploy-remote.sh measures free RAM on the box first and refuses
+# to start the container unless at least 512 MB is free (see the RAM
+# gate). If the box cannot spare it, the deploy aborts and the numbers
+# go in the report — do not lower the limit to force it.
+#
+# Secrets: NEVER in this file or the repo. DATAWATCH_SECRET (Flask
+# sessions) is generated on first install by deploy-remote.sh and
+# persisted in /srv/datawatch/.env on the VPS (mode 600, never printed).
+# DataWatch needs no other secrets: accounts are self-signup, there are
+# no seeded demo logins and no LLM keys.
+
+name: datawatch
+
+services:
+  datawatch:
+    # VPS-side build (see header). The context path is VPS-absolute: this
+    # file only ever runs on the VPS. Local dev runs Flask directly or
+    # `docker build .` from the repo root, never this compose file.
+    build:
+      context: /srv/datawatch/repo
+      dockerfile: Dockerfile
+    image: datawatch:local
+    container_name: datawatch
+    restart: unless-stopped
+    # Gunicorn serves on :5001 inside the container (see Dockerfile).
+    # Host port is 5002: SLATE's API owns 127.0.0.1:8000 on this box and
+    # the agent platform owns 127.0.0.1:8001. Bound to loopback only: the
+    # outside world reaches the app through the Caddy route in
+    # deploy/caddy-snippet, never directly.
+    ports:
+      - "127.0.0.1:5002:5001"
+    env_file:
+      - /srv/datawatch/.env
+    volumes:
+      # All durable state (the SQLite database) lives here.
+      - datawatch-data:/data
+    # Hard limits so this app can never starve SLATE on the shared 8 GB box.
+    mem_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      # /healthz = app up + SQLite readable.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  datawatch-data:
