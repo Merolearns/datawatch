@@ -2,7 +2,6 @@ import csv
 import functools
 import io
 import os
-import re
 import secrets
 import sqlite3
 
@@ -24,6 +23,7 @@ import auth
 import charts
 import engine
 import monitor
+import redos
 import store
 
 
@@ -107,9 +107,12 @@ def _parse_contract_form(form):
         )
         if pattern:
             try:
-                re.compile(pattern)
-            except re.error:
-                return None, f"{name}: pattern {pattern!r} is not a valid regex."
+                redos.validate_pattern(pattern)
+            except redos.PatternUnsafeError as exc:
+                return None, (
+                    f"{name}: pattern {pattern!r} is not allowed: {exc} "
+                    "Use a simpler pattern without nested repetition."
+                )
 
         col = {
             "name": name,

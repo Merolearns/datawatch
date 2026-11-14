@@ -90,6 +90,9 @@ def init_db(db_path) -> None:
         )
         _add_column_if_missing(conn, "datasets", "last_csv_text", "TEXT")
         _add_column_if_missing(conn, "datasets", "last_filename", "TEXT")
+        _add_column_if_missing(
+            conn, "datasets", "pattern_blocked", "INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _add_column_if_missing(conn, table, column, ddl):
@@ -158,14 +161,38 @@ def list_datasets(db_path, user_id):
 def get_dataset(db_path, dataset_id):
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT id, user_id, name, contract_json, created_at FROM datasets WHERE id = ?",
+            "SELECT id, user_id, name, contract_json, created_at,"
+            " pattern_blocked FROM datasets WHERE id = ?",
             (dataset_id,),
         ).fetchone()
         if not row:
             return None
         result = dict(row)
         result["contract"] = json.loads(result.pop("contract_json"))
+        result["pattern_blocked"] = bool(result.get("pattern_blocked", 0))
         return result
+
+
+def set_pattern_blocked(db_path, dataset_id, blocked):
+    """Flag a dataset whose pattern tripped the ReDoS guard.
+
+    The scheduler never re-runs a blocked dataset; a successful manual
+    run clears the flag.
+    """
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE datasets SET pattern_blocked = ? WHERE id = ?",
+            (1 if blocked else 0, dataset_id),
+        )
+
+
+def is_pattern_blocked(db_path, dataset_id):
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT pattern_blocked FROM datasets WHERE id = ?",
+            (dataset_id,),
+        ).fetchone()
+        return bool(row and row["pattern_blocked"])
 
 
 def save_run(db_path, dataset_id, filename, result, profile=None, source="manual") -> int:

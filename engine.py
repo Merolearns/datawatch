@@ -4,6 +4,8 @@ import io
 import math
 import re
 
+import redos
+
 
 def parse_csv_text(text: str) -> list[dict[str, str]]:
     if text is None or text.strip() == "":
@@ -108,6 +110,23 @@ def validate(rows: list[dict[str, str]], contract: dict) -> dict:
         nulls = 0
         distinct_values = set()
 
+        # Compile the user pattern once per column. An invalid pattern is
+        # skipped (dataset creation rejects bad patterns; this is defense
+        # in depth). An unsafe one raises PatternUnsafeError, which
+        # execute_run turns into a blocked dataset instead of running it
+        # -- this is what protects datasets stored before the
+        # creation-time check existed.
+        compiled_pattern = None
+        if pattern:
+            try:
+                compiled_pattern = redos.compile_pattern(pattern)
+            except re.error:
+                compiled_pattern = None
+            except redos.PatternUnsafeError as exc:
+                exc.column = name
+                exc.pattern = pattern
+                raise
+
         for row_idx, row in enumerate(rows):
             value = row.get(name, "")
             row_num = row_idx + 1
@@ -172,14 +191,18 @@ def validate(rows: list[dict[str, str]], contract: dict) -> dict:
                             )
                         )
 
-            # Pattern check (full match; an invalid pattern is skipped —
-            # dataset creation rejects bad patterns, this is defense in depth).
-            if pattern:
+            # Pattern check (full match, wall-clock guarded). A timeout
+            # raises PatternTimeoutError out of validate(); execute_run
+            # turns it into a blocked dataset instead of hanging the
+            # worker thread.
+            if compiled_pattern is not None:
                 checks_run += 1
                 try:
-                    matched = re.fullmatch(pattern, value) is not None
-                except re.error:
-                    matched = True
+                    matched = redos.safe_fullmatch(compiled_pattern, value)
+                except redos.PatternTimeoutError as exc:
+                    exc.column = name
+                    exc.pattern = pattern
+                    raise
                 if not matched:
                     violations.append(
                         _violation(

@@ -11,6 +11,7 @@ import threading
 import time
 
 import engine
+import redos
 import store
 
 
@@ -18,15 +19,55 @@ def execute_run(db_path, dataset, text, filename, source="manual"):
     """Run the contract against CSV text and save everything.
 
     Returns (run_id, validate result). A ValueError from parsing propagates
-    to the caller.
+    to the caller. A PatternUnsafeError from the pattern guard does not
+    propagate: the dataset is flagged pattern_blocked and a failed run
+    (score 0) is saved instead, so the run page explains what happened.
+    A later successful manual run clears the flag; the scheduler never
+    re-runs a blocked dataset (see run_due_checks).
     """
     rows = engine.parse_csv_text(text)
-    result = engine.validate(rows, dataset["contract"])
+    try:
+        result = engine.validate(rows, dataset["contract"])
+    except redos.PatternUnsafeError as exc:
+        store.set_pattern_blocked(db_path, dataset["id"], True)
+        message = (
+            f"Pattern for column {exc.column!r} is unsafe: {exc}. "
+            "The dataset is blocked from scheduled runs -- create a new "
+            "dataset with a simpler pattern."
+        )
+        result = {
+            "score": 0.0,
+            "passed": False,
+            "total_rows": len(rows),
+            "checks_run": 0,
+            "violations": [
+                {
+                    "row": None,
+                    "column": exc.column,
+                    "rule": "pattern",
+                    "severity": "error",
+                    "message": message,
+                    "value": None,
+                }
+            ],
+            "column_stats": {},
+            "summary": {"errors": 1, "warnings": 0},
+        }
+        run_id = store.save_run(
+            db_path, dataset["id"], filename, result, profile=None,
+            source=source,
+        )
+        store.set_last_csv(db_path, dataset["id"], text, filename)
+        evaluate_alerts(db_path, dataset, result, run_id)
+        return run_id, result
     columns = profile.profile_columns(rows, dataset["contract"])
     run_id = store.save_run(
         db_path, dataset["id"], filename, result, profile=columns, source=source
     )
     store.set_last_csv(db_path, dataset["id"], text, filename)
+    # A clean run clears a previous block: a manual retry is the unblock
+    # path for a dataset that timed out once.
+    store.set_pattern_blocked(db_path, dataset["id"], False)
     evaluate_alerts(db_path, dataset, result, run_id)
     return run_id, result
 
@@ -95,6 +136,17 @@ def run_due_checks(db_path, now=None):
         dataset_id = schedule["dataset_id"]
         interval = schedule["interval_minutes"]
         base = schedule["next_run_at"] or now
+        if store.is_pattern_blocked(db_path, dataset_id):
+            # Quarantined after a pattern timeout: the scheduler must
+            # never re-run it. Keep the schedule moving so it does not
+            # spin every tick; a manual run is the only unblock path.
+            store.touch_schedule(
+                db_path,
+                schedule["id"],
+                schedule["last_run_at"],
+                _add_minutes(base, interval),
+            )
+            continue
         try:
             stored = store.get_last_csv(db_path, dataset_id)
             if stored is None:

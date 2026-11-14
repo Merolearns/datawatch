@@ -1,3 +1,7 @@
 Flask
 Flask-WTF
 gunicorn
+# Pinned on purpose (the other deps float): redos.py uses the regex
+# module's in-thread timeout= as the ReDoS wall-clock guard, and the
+# guard's behavior was verified against this exact version.
+regex==2026.11.9
