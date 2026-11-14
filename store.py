@@ -1,5 +1,7 @@
 import json
+import logging
 import sqlite3
+import unicodedata
 from datetime import datetime, timezone
 
 
@@ -93,6 +95,64 @@ def init_db(db_path) -> None:
         _add_column_if_missing(
             conn, "datasets", "pattern_blocked", "INTEGER NOT NULL DEFAULT 0"
         )
+        _normalize_existing_usernames(conn)
+
+
+log = logging.getLogger(__name__)
+
+
+def normalize_identity(value: str) -> str:
+    """Canonical form for a username used as an identity key (gate #20).
+
+    NFKC folds compatibility variants (fullwidth, ligatures, modifier
+    capitals such as 'ᴮᴵᴳᴮᴵᴿᴰ') to their plain form; casefold folds case.
+    Stored usernames are always in this form, so the UNIQUE constraint on
+    users.username enforces uniqueness on the normalized form. Idempotent:
+    normalizing an already-normalized value is a no-op.
+    """
+    return unicodedata.normalize("NFKC", (value or "").strip()).casefold()
+
+
+def _normalize_existing_usernames(conn) -> dict:
+    """One-time backfill: rewrite stored usernames to normalized form.
+
+    Runs inside init_db, so every app start converges legacy rows. Idempotent
+    (already-normalized rows are untouched). On collision, two accounts
+    normalize to the same name: the earliest-created account keeps the name
+    and later ones are renamed to '<name>~<id>' (unique by id) and logged,
+    so no account is silently merged or locked out. Returns a report dict.
+    """
+    rows = conn.execute("SELECT id, username FROM users ORDER BY id").fetchall()
+    raw_names = {row["username"] for row in rows}
+    owner: dict[str, int] = {}
+    renamed = []
+    normalized = 0
+    for row in rows:
+        norm = normalize_identity(row["username"])
+        if norm in owner:
+            # Collision: an earlier account already owns this name.
+            new_name = f"{norm}~{row['id']}"
+            while new_name in owner or new_name in raw_names:
+                new_name = f"{new_name}~{row['id']}"
+            conn.execute(
+                "UPDATE users SET username = ? WHERE id = ?", (new_name, row["id"])
+            )
+            owner[new_name] = row["id"]
+            renamed.append((row["id"], row["username"], new_name))
+            log.warning(
+                "username normalization collision: user %s %r renamed to %r",
+                row["id"],
+                row["username"],
+                new_name,
+            )
+        else:
+            owner[norm] = row["id"]
+            if row["username"] != norm:
+                conn.execute(
+                    "UPDATE users SET username = ? WHERE id = ?", (norm, row["id"])
+                )
+                normalized += 1
+    return {"normalized": normalized, "renamed": renamed}
 
 
 def _add_column_if_missing(conn, table, column, ddl):
@@ -102,6 +162,10 @@ def _add_column_if_missing(conn, table, column, ddl):
 
 
 def create_user(db_path, username, password_hash) -> int:
+    """Gate #20: the username is stored in normalized form (NFKC + casefold),
+    so a confusable variant of an existing username collides here and is
+    rejected as taken instead of becoming a second account."""
+    username = normalize_identity(username)
     with _connect(db_path) as conn:
         try:
             cur = conn.execute(
@@ -114,6 +178,7 @@ def create_user(db_path, username, password_hash) -> int:
 
 
 def get_user(db_path, username):
+    username = normalize_identity(username)
     with _connect(db_path) as conn:
         row = conn.execute(
             "SELECT id, username, password_hash, created_at FROM users WHERE username = ?",

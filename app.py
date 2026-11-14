@@ -236,7 +236,7 @@ def create_app(db_path=None):
     def register():
         error = None
         if request.method == "POST":
-            username = request.form.get("username", "").strip()
+            username = store.normalize_identity(request.form.get("username", ""))
             password = request.form.get("password", "")
             if len(username) < 3 or len(password) < 8:
                 error = "Username must be at least 3 characters and password at least 8 characters."
@@ -256,7 +256,7 @@ def create_app(db_path=None):
     def login():
         error = None
         if request.method == "POST":
-            username = request.form.get("username", "").strip()
+            username = store.normalize_identity(request.form.get("username", ""))
             password = request.form.get("password", "")
             user = store.get_user(db_path, username)
             if user is None or not auth.verify_password(password, user["password_hash"]):
